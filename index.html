@@ -658,15 +658,24 @@ return toUTF8Array(s);};}();(function(factory){if(typeof define==='function'&&de
     min-height:600px;
   }
 
+  /* Applied by JS only when the text content (objetivos / responsabilidades /
+     requisitos) doesn't fit within the fixed-height poster alongside the
+     hero photo. Hiding the photo reclaims its ~230px + margins so long job
+     posts still show their full text instead of having it silently
+     clipped by .jobpost's overflow:hidden. */
+  .jobpost.no-hero .jobpost-hero{display:none;}
+  .jobpost.no-hero .jobpost-card{margin-top:30px;}
+
   .jobpost-left{display:flex; flex-direction:column;}
   .jobpost-eyebrow{
     font-size:13px; font-weight:600; letter-spacing:0.03em;
-    text-transform:uppercase; color:#8a8a86; margin-bottom:10px;
+    text-transform:uppercase; color:#8a8a86; margin-bottom:6px;
   }
   .jobpost-title{
-    font-size:40px; font-weight:800; line-height:1.05;
-    color:var(--vac-ink); margin-bottom:20px;
-    overflow-wrap:break-word;
+    font-size:var(--title-fs, 40px); font-weight:800; line-height:1.02;
+    color:var(--vac-ink); margin-bottom:14px;
+    overflow-wrap:normal;
+    word-break:keep-all;
     text-transform:uppercase;
   }
   .jobpost-badges{display:flex; flex-direction:column; gap:8px; align-items:flex-start; margin-bottom:auto;}
@@ -690,22 +699,22 @@ return toUTF8Array(s);};}();(function(factory){if(typeof define==='function'&&de
     background:#fff;
   }
   .jobpost-qr canvas, .jobpost-qr img, .jobpost-qr svg{width:100%; height:100%; display:block;}
-  .jobpost-apply-text{font-size:12.5px; line-height:1.5; color:#3a3a38;}
-  .jobpost-apply-title{font-size:13.5px; font-weight:700; color:var(--vac-ink); margin-bottom:4px;}
+  .jobpost-apply-text{font-size:12.5px; line-height:1.3; color:#3a3a38;}
+  .jobpost-apply-title{font-size:13.5px; font-weight:700; color:var(--vac-ink); margin-bottom:3px;}
   .jobpost-apply-link{color:#c9852a; font-weight:600;}
 
-  .jobpost-right{display:flex; flex-direction:column; gap:18px;}
+  .jobpost-right{display:flex; flex-direction:column; gap:13px;}
   .jobpost-section-title{
     font-size:14.5px; font-weight:700; letter-spacing:0.01em;
-    text-transform:uppercase; color:var(--vac-ink); margin-bottom:8px;
+    text-transform:uppercase; color:var(--vac-ink); margin-bottom:5px;
   }
   .jobpost-paragraph{
-    font-size:14.5px; line-height:1.6; color:#3a3a38; text-align:justify;
+    font-size:14.5px; line-height:1.35; color:#3a3a38; text-align:justify;
   }
   .jobpost-bullets{margin:0; padding:0; list-style:none;}
   .jobpost-bullets li{
-    font-size:14.5px; line-height:1.55; color:#3a3a38;
-    position:relative; padding-left:16px; margin-bottom:6px;
+    font-size:14.5px; line-height:1.3; color:#3a3a38;
+    position:relative; padding-left:16px; margin-bottom:3px;
     text-align:justify;
   }
   .jobpost-bullets li::before{
@@ -719,7 +728,7 @@ return toUTF8Array(s);};}();(function(factory){if(typeof define==='function'&&de
     align-items:center;
     justify-content:space-between;
   }
-  .jobpost-footer-text{font-size:11px; color:#6a6a66; line-height:1.4;}
+  .jobpost-footer-text{font-size:11px; color:#6a6a66; line-height:1.25;}
   .jobpost-footer-domain{font-weight:800; color:var(--vac-ink); letter-spacing:0.01em;}
   .jobpost-social{display:flex; gap:8px;}
   .jobpost-social-icon{
@@ -1652,8 +1661,82 @@ return toUTF8Array(s);};}();(function(factory){if(typeof define==='function'&&de
     `;
 
     document.getElementById('jobpost').innerHTML = html;
+    fitTitleFontSize();
+    fitHeroVisibility();
     renderTabBar();
     persistActiveTabSnapshot();
+  }
+
+  // ===================================================================
+  // HERO AUTO-HIDE — the poster has a fixed height with overflow:hidden,
+  // so long objetivos/responsabilidades/requisitos text used to get
+  // silently clipped with no visual warning. This measures whether the
+  // content actually overflows and, if so, hides the hero photo to
+  // reclaim its vertical space for text instead.
+  //
+  // overflow:hidden masks scrollHeight (it always reports the clamped
+  // height), so detection works by temporarily lifting the clip, reading
+  // where the footer really lands, then restoring it.
+  // ===================================================================
+  function contentOverflows(jobpostEl){
+    const footer = jobpostEl.querySelector('.jobpost-footer');
+    if(!footer) return false;
+    const previousOverflow = jobpostEl.style.overflow;
+    const previousHeight = jobpostEl.style.height;
+    jobpostEl.style.overflow = 'visible';
+    jobpostEl.style.height = 'auto';
+    const naturalHeight = jobpostEl.scrollHeight;
+    jobpostEl.style.overflow = previousOverflow;
+    jobpostEl.style.height = previousHeight;
+    return naturalHeight > 1012.5;
+  }
+
+  function fitHeroVisibility(){
+    const jobpostEl = document.getElementById('jobpost');
+    if(!jobpostEl) return;
+    // Start from the "with hero" state every time — re-measure fresh rather
+    // than trusting whatever class was left over from the previous render,
+    // since edits can make content shorter again too.
+    jobpostEl.classList.remove('no-hero');
+    if(contentOverflows(jobpostEl)){
+      jobpostEl.classList.add('no-hero');
+    }
+  }
+
+  // ===================================================================
+  // TITLE AUTO-FIT — never break a word mid-way. If the longest word in
+  // the job title is wider than the column, shrink the title's font-size
+  // (in 1px steps) until every word fits on its own line width. This is
+  // checked against a hidden measuring clone so it never causes a visible
+  // flash of the wrong size, and it's re-run on every render() since the
+  // title text or the available column width could have changed.
+  // ===================================================================
+  function fitTitleFontSize(){
+    const titleEl = document.querySelector('#jobpost .jobpost-title');
+    if(!titleEl || !titleEl.textContent.trim()) return;
+
+    const maxFontSize = 40;
+    const minFontSize = 22;
+    const containerWidth = titleEl.parentElement.clientWidth;
+
+    // Measure with a detached canvas context instead of touching the live
+    // DOM repeatedly — far cheaper than reflowing the real element in a loop.
+    const canvas = fitTitleFontSize._canvas || (fitTitleFontSize._canvas = document.createElement('canvas'));
+    const ctx = canvas.getContext('2d');
+    const words = titleEl.textContent.trim().split(/\s+/);
+
+    let fontSize = maxFontSize;
+    while(fontSize > minFontSize){
+      // font-weight 800, uppercase — matches the rendered title exactly so
+      // the measurement reflects the real glyph widths, not a generic guess.
+      ctx.font = `800 ${fontSize}px "Helvetica Neue", Arial, sans-serif`;
+      const widest = Math.max(...words.map(w => ctx.measureText(w.toUpperCase()).width));
+      if(widest <= containerWidth) break;
+      fontSize -= 1;
+    }
+
+    titleEl.style.setProperty('--title-fs', fontSize + 'px');
+    titleEl.style.fontSize = fontSize + 'px';
   }
 
   // ===================================================================
@@ -2039,109 +2122,34 @@ return toUTF8Array(s);};}();(function(factory){if(typeof define==='function'&&de
 
   // ===================================================================
   // TRANSLATION (ES -> EN)
-  // No external translation API is wired into this static page, so this
-  // ships a phrase-level dictionary tuned to common HR/job-post language.
-  // It produces clean, presentable English for spoken delivery — but it
-  // is a starting draft, not a certified translation. Always proofread.
+  // Uses Google's public translation endpoint (no API key required — the
+  // same one many browser extensions use under the hood). This requires
+  // outbound network access; if the network blocks it (corporate proxy,
+  // firewall, offline use), translation fails visibly with a retry option
+  // rather than silently producing a broken half-English, half-Spanish
+  // draft, which is what the previous dictionary-based approach did for
+  // any text it hadn't been hand-tuned for.
   // ===================================================================
   const JOBTYPE_EN = { 'Full-time':'Full-time', 'Part-time':'Part-time', 'Por horas':'Hourly', 'Temporal':'Temporary', 'Pasantía':'Internship' };
   const WORKTYPE_EN = { 'On-Site':'On-Site', 'Remoto':'Remote', 'Híbrido':'Hybrid' };
 
-  const PHRASE_DICTIONARY = [
-    [/^estamos contratando$/i, 'We are hiring'],
-    [/^se parte de$/i, 'Join'],
-    // common job titles in marketing / textile operations — translated as full phrases
-    // so they read naturally rather than word-by-word.
-    [/^asistente de mercadeo$/i, 'Marketing Assistant'],
-    [/^asistente de (.+)$/i, 'Assistant, $1'],
-    [/^coordinador(a)? de mercadeo$/i, 'Marketing Coordinator'],
-    [/^coordinador(a)? de (.+)$/i, '$1 Coordinator'],
-    [/^gerente de mercadeo$/i, 'Marketing Manager'],
-    [/^gerente de (.+)$/i, '$1 Manager'],
-    [/^jefe de (.+)$/i, '$1 Lead'],
-    [/^analista de (.+)$/i, '$1 Analyst'],
-    [/^diseñador(a)? gráfico(a)?$/i, 'Graphic Designer'],
-    [/^diseñador(a)? de (.+)$/i, '$1 Designer'],
-    [/^practicante de (.+)$/i, '$1 Intern'],
-    [/apoyar al equipo de (.+?) en la creación de/i, 'support the $1 team in creating'],
-    [/apoyar al equipo de (.+?) en/i, 'support the $1 team in'],
-    [/materiales visuales y contenidos digitales/i, 'visual materials and digital content'],
-    [/que fortalezcan la comunicación e identidad de la marca/i, 'that strengthen the brand\u2019s communication and identity'],
-    [/la posición brinda soporte creativo en/i, 'the role provides creative support for'],
-    [/el diseño de piezas gráficas, contenido digital y materiales para/i, 'designing graphic pieces, digital content, and materials for'],
-    [/campañas internas y externas/i, 'internal and external campaigns'],
-    [/diseñar materiales gráficos para redes sociales/i, 'Design graphic materials for social media'],
-    [/presentaciones y comunicación interna/i, 'presentations, and internal communications'],
-    [/apoyar en la creación de piezas promocionales, plantillas y recursos visuales corporativos/i, 'Support the creation of promotional pieces, templates, and corporate visual resources'],
-    [/editar fotografías y videos básicos para campañas digitales o uso institucional/i, 'Edit basic photos and videos for digital campaigns or institutional use'],
-    [/diseñar banners, infografías, publicaciones y piezas de comunicación visual/i, 'Design banners, infographics, posts, and visual communication pieces'],
-    [/apoyar en proyectos de comunicación interna y materiales para eventos corporativos/i, 'Support internal communication projects and materials for corporate events'],
-    [/asegurar coherencia con la identidad visual de la marca en todas las piezas producidas/i, 'Ensure consistency with the brand\u2019s visual identity across all materials produced'],
-    [/estudiante o recién egresado de (.+)/i, 'Student or recent graduate in $1'],
-    [/conocimientos básicos en (.+)/i, 'Basic knowledge of $1'],
-    [/conocimiento general en (.+)/i, 'General knowledge of $1'],
-    [/nivel de inglés intermedio \(indispensable\)/i, 'Intermediate English level (required)'],
-    [/nivel de inglés avanzado/i, 'Advanced English level'],
-    [/nivel de inglés básico/i, 'Basic English level'],
-    [/residir cerca de (.+)/i, 'Live near $1'],
-    [/disponibilidad para movilizarse a (.+?) cuando sea requerido/i, 'Available to travel to $1 when required'],
-    [/disponibilidad para (.+)/i, 'Available to $1'],
-    [/comunicación visual/i, 'visual communication'],
-    [/diseño gráfico/i, 'Graphic Design'],
-    [/(\w+) o carrera afín/i, '$1 or a related field'],
-    [/carrera afín/i, 'a related field'],
-    [/o carrera afín/i, 'or a related field'],
-  ];
+  // All free-text fields are joined with a separator unlikely to appear in
+  // real copy, translated in a single request (faster, avoids per-field
+  // rate limits), then split back apart by the same separator.
+  const TRANSLATE_SEP = '\n@@SEP@@\n';
 
-  function translatePhraseLevel(text){
-    if(!text) return text;
-    let out = text;
-    PHRASE_DICTIONARY.forEach(([pattern, replacement]) => {
-      out = out.replace(pattern, replacement);
-    });
-    return out;
-  }
-
-  // Word-level fallback dictionary for anything the phrase rules didn't catch —
-  // keeps the draft readable even outside the exact phrasing above.
-  const WORD_DICTIONARY = {
-    'apoyar':'support','diseñar':'design','editar':'edit','asegurar':'ensure',
-    'residir':'live','postularse':'apply','postúlate':'apply','requerido':'required',
-    'indispensable':'required','deseable':'preferred','experiencia':'experience',
-    'mínima':'minimum','mínimo':'minimum','años':'years','año':'year',
-    'estudiante':'student','egresado':'graduate','carrera':'degree',
-    'conocimiento':'knowledge','conocimientos':'knowledge','habilidad':'skill',
-    'habilidades':'skills','equipo':'team','marca':'brand','redes':'media',
-    'sociales':'social','contenido':'content','contenidos':'content',
-    'materiales':'materials','comunicación':'communication','interna':'internal',
-    'externa':'external','internas':'internal','externas':'external','campañas':'campaigns',
-    'eventos':'events','corporativos':'corporate','identidad':'identity','visual':'visual',
-    'piezas':'pieces','plantillas':'templates','recursos':'resources','fotografías':'photos',
-    'videos':'videos','digitales':'digital','institucional':'institutional','banners':'banners',
-    'infografías':'infographics','publicaciones':'posts','proyectos':'projects',
-    'coherencia':'consistency','producidas':'produced','cerca':'near','disponibilidad':'availability',
-    'movilizarse':'travel','cuando':'when','sea':'is',
-  };
-
-  function translateWordLevel(text){
-    if(!text) return text;
-    return text.split(/\b/).map(tok => {
-      const lower = tok.toLowerCase();
-      if(WORD_DICTIONARY.hasOwnProperty(lower)){
-        return matchCase(tok, WORD_DICTIONARY[lower]);
-      }
-      return tok;
-    }).join('');
-  }
-
-  function translateText(text){
-    if(!text) return '';
-    // translate per line/sentence so phrase rules anchored with ^...$ can match bullets
-    return text.split('\n').map(line => {
-      const phrased = translatePhraseLevel(line.trim());
-      // If phrase-level rules changed nothing meaningful, fall back to word-level
-      return phrased;
-    }).join('\n');
+  async function translateBatch(parts){
+    const joined = parts.map(p => p || '').join(TRANSLATE_SEP);
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=es&tl=en&dt=t&q=${encodeURIComponent(joined)}`;
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('La respuesta del servicio de traducción no fue válida (' + res.status + ').');
+    const data = await res.json();
+    // The endpoint returns [[[translatedChunk, originalChunk, ...], ...], ...] —
+    // chunks are split wherever Google's own sentence segmentation lands,
+    // which rarely lines up with our separator, so every chunk is
+    // concatenated back into one string before splitting on our marker.
+    const translatedFull = (data[0] || []).map(chunk => chunk[0]).join('');
+    return translatedFull.split(TRANSLATE_SEP.trim()).map(s => s.trim());
   }
 
   function capitalizeFirst(str){
@@ -2149,14 +2157,26 @@ return toUTF8Array(s);};}();(function(factory){if(typeof define==='function'&&de
     return str.replace(/^(\s*)([a-záéíóúñü])/, (m, ws, c) => ws + c.toUpperCase());
   }
 
-  function buildTranslationDraft(){
+  async function buildTranslationDraft(){
     const f = collectSnapshot().fields;
+    const resp = currentResponsabilidades.filter(x => x.trim());
+    const reqs = currentRequisitos.filter(x => x.trim());
+
+    // Fixed-size parts list: title, eyebrow, objetivos, then N responsabilidades,
+    // then M requisitos. Lengths are recorded up front so the flat translated
+    // array can be sliced back into the right groups after the request.
+    const parts = [f.jobtitle, f.eyebrow, f.objetivos, ...resp, ...reqs];
+    const translated = await translateBatch(parts);
+
+    let i = 0;
+    const jobtitle = capitalizeFirst(translated[i++] || '');
+    const eyebrow = capitalizeFirst(translated[i++] || '') || 'We are hiring';
+    const objetivos = capitalizeFirst(translated[i++] || '');
+    const responsabilidades = resp.map(() => capitalizeFirst(translated[i++] || ''));
+    const requisitos = reqs.map(() => capitalizeFirst(translated[i++] || ''));
+
     return {
-      jobtitle: capitalizeFirst(translateWordLevel(translatePhraseLevel(f.jobtitle))),
-      eyebrow: translatePhraseLevel(f.eyebrow) || 'We are hiring',
-      objetivos: capitalizeFirst(translateWordLevel(translatePhraseLevel(f.objetivos))),
-      responsabilidades: currentResponsabilidades.filter(x=>x.trim()).map(x => capitalizeFirst(translateWordLevel(translatePhraseLevel(x)))),
-      requisitos: currentRequisitos.filter(x=>x.trim()).map(x => capitalizeFirst(translateWordLevel(translatePhraseLevel(x)))),
+      jobtitle, eyebrow, objetivos, responsabilidades, requisitos,
       jobtype: JOBTYPE_EN[f.jobtype] || f.jobtype,
       worktype: WORKTYPE_EN[f.worktype] || f.worktype,
     };
@@ -2168,6 +2188,16 @@ return toUTF8Array(s);};}();(function(factory){if(typeof define==='function'&&de
         <div class="translate-spinner"></div>
         <span>Traduciendo el anuncio…</span>
       </div>`;
+  }
+
+  function renderTranslateModalError(message){
+    document.getElementById('translate-modal-body').innerHTML = `
+      <div class="translate-loading" style="color:var(--vac-orange);">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span style="color:var(--ink); text-align:center; max-width:40ch;">No se pudo traducir. ${escapeHtml(message)}<br><span style="color:var(--graphite); font-size:12px;">Esto requiere conexión a internet sin restricciones de red (algunas redes corporativas bloquean el servicio de traducción).</span></span>
+        <button class="btn btn-secondary" id="retry-translate-btn" type="button" style="margin-top:6px;">Reintentar</button>
+      </div>`;
+    document.getElementById('retry-translate-btn').addEventListener('click', openTranslateModal);
   }
 
   function renderTranslateModalResult(draft){
@@ -2190,19 +2220,23 @@ return toUTF8Array(s);};}();(function(factory){if(typeof define==='function'&&de
           <div class="translate-field"><div class="translate-field-label">Requirements</div><div class="translate-field-value">${draft.requisitos.map(x=>'• '+escapeHtml(x)).join('<br>') || '—'}</div></div>
         </div>
       </div>
+      <p style="font-size:11px; color:var(--stone); margin:18px 0 0; line-height:1.5;">Traducción automática vía Google Translate. Revisa el texto antes de publicar — algunos matices técnicos o de tono pueden necesitar ajuste manual.</p>
     `;
   }
 
-  function openTranslateModal(){
+  async function openTranslateModal(){
     document.getElementById('translate-modal').classList.add('visible');
     renderTranslateModalLoading();
-    setTimeout(() => {
-      const draft = buildTranslationDraft();
+    try{
+      const draft = await buildTranslationDraft();
       const tab = getActiveTab();
       tab.snapshot.translation = draft;
       saveTabsToStorage();
       renderTranslateModalResult(draft);
-    }, 450); // brief delay so the loading state is perceptible, matching the rest of the suite's feel
+    }catch(err){
+      console.error('Translation failed:', err);
+      renderTranslateModalError(err.message || 'Error de red.');
+    }
   }
 
   document.getElementById('translate-btn').addEventListener('click', openTranslateModal);
